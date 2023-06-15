@@ -4,6 +4,9 @@
 author: dustin.wei
 email: dustin.wei@quectel.com
 date: 2023-2-14
+
+背景：QuecPython的machine.uart串口通信模块的读写均为**非阻塞**模式，现需求实现**阻塞**模式`读`操作。
+功能描述：封装Serial类，实现基于QuecPython的串口通信阻塞/非阻塞读操作。
 """
 
 import _thread
@@ -31,6 +34,7 @@ class Waiter(object):
 
 
 class Condition(object):
+    """条件变量(使用互斥锁实现)"""
 
     def __init__(self):
         self.__lock = _thread.allocate_lock()
@@ -59,6 +63,7 @@ class Condition(object):
 
 
 class TimerContext(object):
+    """基于machine.Timer的定时器实现(ONE_SHOT模式)。支持上下文管理器协议。"""
     __timer = Timer(Timer.Timer1)
 
     def __init__(self, timeout, callback):
@@ -75,6 +80,7 @@ class TimerContext(object):
 
 
 class Serial(object):
+    """串口通信"""
 
     def __init__(self, port=UART.UART2, baudrate=115200, bytesize=8, parity=0, stopbits=1, flowctl=0):
         self.__uart = UART(port, baudrate, bytesize, parity, stopbits, flowctl)
