@@ -2,107 +2,73 @@ import _thread
 import ujson as json
 
 
-class MutexMethod(object):
-    default_lock = _thread.allocate_lock()
-
-    def __init__(self, lock=None):
-        self.lock = lock or self.default_lock
-
-    def __call__(self, method):
-        def wrapper(*args, **kwargs):
-            with self.lock:
-                return method(*args, **kwargs)
-        return wrapper
-
-
 class JsonConfigureClass(object):
+    GET = 0x01
+    SET = 0x02
+    DEL = 0x03
 
     def __init__(self, path, encoding='utf8'):
-        self.config_path = path
+        self.path = path
         self.encoding = encoding
+        self.lock = _thread.allocate_lock()
         self.settings = None
         self.load()  # first load setting from json file.
 
-    def __str__(self):
-        return str(self.settings)
-
-    def __repr__(self):
-        return self.__str__()
-
-    @MutexMethod()
     def load(self, reload=False):
         if (self.settings is None) or reload:
-            with open(self.config_path, 'r', encoding=self.encoding) as f:
-                self.settings = json.load(f)
+            with self.lock:
+                with open(self.path, 'r', encoding=self.encoding) as f:
+                    self.settings = json.load(f)
 
     def reload(self):
         self.load(reload=True)
 
-    @MutexMethod()
     def save(self):
-        with open(self.config_path, 'w+', encoding=self.encoding) as f:
-            json.dump(self.settings, f)
+        with self.lock:
+            with open(self.path, 'w+', encoding=self.encoding) as f:
+                json.dump(self.settings, f)
 
-    @MutexMethod()
     def get(self, key):
-        return self.recurse_execute(
-            self.settings,
-            key.split('.'),
-            operate='get'
-        )
+        with self.lock:
+            return self.execute(self.settings, key.split('.'), operate=self.GET)
 
     def __getitem__(self, item):
         return self.get(item)
 
-    @MutexMethod()
     def set(self, key, value):
-        return self.recurse_execute(
-            self.settings,
-            key.split('.'),
-            value=value,
-            operate='set'
-        )
+        with self.lock:
+            return self.execute(self.settings, key.split('.'), value=value, operate=self.SET)
 
     def __setitem__(self, key, value):
         return self.set(key, value)
 
-    @MutexMethod()
     def delete(self, key):
-        keys = key.split('.')
-        return self.recurse_execute(
-            self.settings,
-            keys,
-            operate='delete'
-        )
+        with self.lock:
+            return self.execute(self.settings, key.split('.'), operate=self.DEL)
 
     def __delitem__(self, key):
         return self.delete(key)
 
-    def recurse_execute(self, settings, keys, value=None, operate=''):
-        if len(keys) == 0:
-            return
-
-        if not isinstance(settings, dict):
-            raise TypeError('config item \"{}\" is not valid(DictLike).'.format(settings))
+    def execute(self, dict_, keys, value=None, operate=None):
 
         key = keys.pop(0)
 
         if len(keys) == 0:
-            if operate == 'get':
-                return settings[key]
-            elif operate == 'set':
-                settings[key] = value
-            elif operate == 'delete':
-                del settings[key]
+            if operate == self.GET:
+                return dict_[key]
+            elif operate == self.SET:
+                dict_[key] = value
+            elif operate == self.DEL:
+                del dict_[key]
             return
 
-        if key not in settings:
-            if operate == 'set':
-                settings[key] = {}  # auto create sub items recursively.
+        if key not in dict_:
+            if operate == self.SET:
+                dict_[key] = {}  # auto create sub items recursively.
             else:
                 return
 
-        return self.recurse_execute(settings[key], keys, value=value, operate=operate)
+        return self.execute(dict_[key], keys, value=value, operate=operate)
 
 
 def ConfigureHandler(path):
@@ -112,4 +78,4 @@ def ConfigureHandler(path):
         raise TypeError('file format not supported!')
 
 
-config = ConfigureHandler('/usr/config.json')
+# config = ConfigureHandler('/usr/config.json')

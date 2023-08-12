@@ -59,12 +59,12 @@ class Condition(object):
                 self.__waiters.remove(waiter)
 
     def notify_all(self, info=None):
-        self.notify(n=len(self.__waiters), info=info)
+        self.notify(n=len(self.__waiters), info=info)   
 
 
 class TimerContext(object):
-    """基于machine.Timer的定时器实现(ONE_SHOT模式)。支持上下文管理器协议。"""
-    __timer = Timer(Timer.Timer1)
+    """基于osTimer的定时器实现(ONE_SHOT模式)。支持上下文管理器协议。"""
+    __timer = osTimer()
 
     def __init__(self, timeout, callback):
         self.timeout = timeout  # ms; >0 will start a one shot timer, <=0 do nothing.
@@ -72,7 +72,7 @@ class TimerContext(object):
 
     def __enter__(self):
         if self.timeout > 0:
-            self.__timer.start(period=self.timeout, mode=Timer.ONE_SHOT, callback=self.timer_cb)
+            self.__timer.start(self.timeout, 0, self.timer_cb)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.timeout > 0:
@@ -107,10 +107,12 @@ class Serial(object):
             return self.__uart.read(size)
 
         r_data = b''
-        with TimerContext(timeout, self.__timer_cb):
+        with TimerContext(timeout, self.__timer_cb) as timer:
             while len(r_data) < size:
                 raw = self.__uart.read(1)
                 if not raw:
+                    if timer.finished():
+                        break
                     if self.__cond.wait():
                         break
                 else:

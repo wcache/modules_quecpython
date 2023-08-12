@@ -1,4 +1,5 @@
 import _thread
+import osTimer
 
 
 class Singleton(object):
@@ -98,7 +99,6 @@ class Event(object):
             
 
 # 单次定时器（自动关闭）
-import osTimer
 class OneShotTimer(object):
 
     def __init__(self, callback=None):
@@ -111,6 +111,11 @@ class OneShotTimer(object):
 
     def start(self, period):
         self.timer.start(period, 0, self.cb)
+
+    def interrupt(self, do=True):
+        self.timer.stop()
+        if do:
+            self.user_callback(None)
 
     def cb(self, args):
         self.user_callback(args)
@@ -129,3 +134,22 @@ class MutexMethod(object):
             with self.lock:
                 return method(*args, **kwargs)
         return wrapper
+        
+
+class Mutex(object):
+
+    def __init__(self):
+        self.__lock = _thread.allocate_lock()
+        self.__unlock_timer = osTimer()
+
+    def __auto_unlock(self, args):
+        self.release()
+
+    def acquire(self, timeout=-1):
+        if timeout > 0:
+            self.__unlock_timer.start(timeout*1000, 0, self.__auto_unlock)
+        self.__lock.acquire()
+
+    def release(self):
+        if self.__lock.locked():
+            self.__lock.release()
