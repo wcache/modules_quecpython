@@ -4,43 +4,40 @@ import osTimer
 
 class Singleton(object):
     """单例装饰"""
-    __lock = Lock()
 
     def __init__(self, cls):
         self.cls = cls
         self.instance = None
 
     def __call__(self, *args, **kwargs):
-        with self.__lock:
-            if self.instance is None:
-                self.instance = self.cls(*args, **kwargs)
-            return self.instance
-
-    def __str__(self):
-        return str(self.cls)
+        if self.instance is None:
+            self.instance = self.cls(*args, **kwargs)
+        return self.instance
 
     def __repr__(self):
-        return self.__str__()
+        return self.cls.__repr__()
 
 
 class Waiter(object):
 
     def __init__(self):
-        self.__info = None  # usr information for notifier
-
         self.__lock = _thread.allocate_lock()
         self.__lock.acquire()  # acquire immediately for holding the lock.
+        self.__unlock_timer = osTimer()
 
-        self.acquire = self.__lock.acquire
-        self.release = self.__lock.release
+    def __auto_unlock(self, _):
+        self.notify()
 
-    @property
-    def info(self):
-        return self.__info
+    def wait(self, timeout=-1):
+        if timeout > 0:
+            self.__unlock_timer.start(timeout * 1000, 0, self.__auto_unlock)
+        self.__lock.acquire()
+        self.__lock.release()
+        self.__unlock_timer.stop()
 
-    @info.setter
-    def info(self, info):
-        self.__info = info
+    def notify(self):
+        if self.__lock.locked():
+            self.__lock.release()
 
 
 class Condition(object):
@@ -56,20 +53,19 @@ class Condition(object):
             self.__waiters.append(waiter)
         return waiter
 
-    def wait(self):
+    def wait(self, timeout=-1):
         waiter = self.__create_waiter()
-        waiter.acquire()  # block here, waiting for release in the future.
-        return waiter.info
+        waiter.wait(timeout)
+        with self.__lock:
+            self.__waiters.remove(waiter)
 
-    def notify(self, n=1, info=None):
+    def notify(self, n=1):
         with self.__lock:
             for waiter in self.__waiters[:n]:
-                waiter.info = info
-                waiter.release()  # release here, some `wait` method will be unblocked.
-                self.__waiters.remove(waiter)
+                waiter.notify()
 
-    def notify_all(self, info=None):
-        self.notify(n=len(self.__waiters), info=info)
+    def notify_all(self):
+        self.notify(n=len(self.__waiters))
 
 
 class Event(object):
