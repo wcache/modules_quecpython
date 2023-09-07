@@ -219,11 +219,18 @@ class MessageService(object):
         waiter = Waiter()
         with self.ack_lock:
             self.ack_dict[request] = [None, waiter]
-        waiter.acquire(timeout)
-        with self.ack_lock:
-            response = self.ack_dict[request][0]
-            del self.ack_dict[request]
-        return response
+
+        try:
+            waiter.acquire(timeout)
+        except TimeoutError as e:
+            with self.ack_lock:
+                del self.ack_dict[request]
+            return
+        else:
+            with self.ack_lock:
+                response = self.ack_dict[request][0]
+                del self.ack_dict[request]
+            return response
 
     def put_ack(self, response):
         with self.ack_lock:
@@ -238,15 +245,12 @@ class MessageService(object):
         while True:
             try:
                 data = self.stream.read(1024, timeout=10)
-                if data in (b'+++++', b'-----'):
-                    self.queue.put(data)
-                else:
-                    parser.parse(data)
-                    for msg in parser.messages:
-                        if msg.ack:
-                            self.put_ack(msg)
-                        else:
-                            self.queue.put(msg)
+                parser.parse(data)
+                for msg in parser.messages:
+                    if msg.ack:
+                        self.put_ack(msg)
+                    else:
+                        self.queue.put(msg)
             except TimeoutError:
                 parser.clear()
                 continue
