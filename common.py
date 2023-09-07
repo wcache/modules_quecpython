@@ -12,10 +12,6 @@ class TimeoutError(Exception):
     pass
 
 
-class FullError(Exception):
-    pass
-
-
 class Singleton(object):
     def __init__(self, cls):
         self.cls = cls
@@ -153,10 +149,8 @@ class Thread(object):
 
     def start(self, delay=-1):
         if not self.is_running():
-            if delay > 0:
-                utime.sleep(delay)
             result = _Result()
-            self.__worker_thread_id = _thread.start_new_thread(self.run, (result, ))
+            self.__worker_thread_id = _thread.start_new_thread(self.run, (result, delay))
             return result
 
     def stop(self):
@@ -164,7 +158,9 @@ class Thread(object):
             _thread.stop_thread(self.__worker_thread_id)
             self.__worker_thread_id = None
 
-    def run(self, result):
+    def run(self, result, delay):
+        if delay > 0:
+            utime.sleep(delay)
         try:
             rv = self.__target(*self.__args, **self.__kwargs)
         except Exception as e:
