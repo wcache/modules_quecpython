@@ -8,10 +8,6 @@ from queue import Queue
 Lock = _thread.allocate_lock
 
 
-class TimeoutError(Exception):
-    pass
-
-
 class Singleton(object):
     def __init__(self, cls):
         self.cls = cls
@@ -31,27 +27,35 @@ class Waiter(object):
     def __init__(self):
         self.__lock = _thread.allocate_lock()
         self.__unlock_timer = osTimer()
-        self.__is_timeout = False
+        self.__gotit = True
 
-    def __auto_unlock(self, _):
-        self.__is_timeout = True
-        self.release()
+    def __auto_release(self, _):
+        if self.__release():
+            self.__gotit = False
+
+    def __acquire(self):
+        return self.__lock.acquire()
 
     def acquire(self, timeout=-1):
         self.__lock.acquire()
+        self.__gotit = True
         if timeout > 0:
-            self.__is_timeout = False
-            self.__unlock_timer.start(timeout * 1000, 0, self.__auto_unlock)
-        self.__lock.acquire()  # block until timeout or release
-        self.__unlock_timer.stop()
-        if self.__lock.locked():
+            self.__unlock_timer.start(timeout * 1000, 0, self.__auto_release)
+        self.__acquire()  # block here
+        if timeout > 0:
+            self.__unlock_timer.stop()
+        self.__release()
+        return self.__gotit
+
+    def __release(self):
+        try:
             self.__lock.release()
-        if self.__is_timeout:
-            raise TimeoutError
+        except RuntimeError:
+            return False
+        return True
 
     def release(self):
-        if self.__lock.locked():
-            self.__lock.release()
+        return self.__release()
 
 
 class Condition(object):
@@ -64,14 +68,10 @@ class Condition(object):
         waiter = Waiter()
         with self.__lock:
             self.__waiters.append(waiter)
-
-        try:
-            waiter.acquire(timeout)  # block until timeout or notify
-        except TimeoutError as exc:
-            raise exc
-        finally:
-            with self.__lock:
-                self.__waiters.remove(waiter)
+        gotit = waiter.acquire(timeout)
+        with self.__lock:
+            self.__waiters.remove(waiter)
+        return gotit
 
     def notify(self, n=1):
         if n <= 0:
@@ -94,10 +94,10 @@ class Event(object):
         self.cond = Condition()
 
     def wait(self, timeout=-1):
-        """wait until internal flag is True"""
-        if not self.is_set():
-            self.cond.wait(timeout)
-        return self.flag
+        signaled = self.is_set()
+        if not signaled:
+            signaled = self.cond.wait(timeout)
+        return signaled
 
     def set(self):
         with self.__lock:
@@ -115,6 +115,9 @@ class Event(object):
 
 class _Result(object):
 
+    class TimeoutError(Exception):
+        pass
+
     def __init__(self):
         self.__rv = None
         self.__exc = None
@@ -126,10 +129,12 @@ class _Result(object):
         self.__finished.set()
 
     def get(self, timeout=-1):
-        self.__finished.wait(timeout=timeout)
-        if self.__exc:
-            raise self.__exc
-        return self.__rv
+        if self.__finished.wait(timeout=timeout):
+            if self.__exc:
+                raise self.__exc
+            return self.__rv
+        else:
+            raise self.TimeoutError('get result timeout.')
 
 
 class Thread(object):
